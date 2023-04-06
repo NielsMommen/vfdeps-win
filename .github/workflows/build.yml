@@ -15,11 +15,11 @@ jobs:
           git checkout .
 
       - name: Build setup
-        run: ./setup-build
+        run: ./setup-build.sh
         shell: bash
       
       - name: Build
-        run: ./build
+        run: ./build.sh
         shell: bash
         
       - name: Upload Package
