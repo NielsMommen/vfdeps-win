@@ -34,7 +34,7 @@ ocaml-$(OCAML_VERSION)/flexdll/flexdll.c: | $(OCAML_DIR) $(FLEXDLL_DIR)
 $(OCAML_EXE): ocaml-$(OCAML_VERSION)/flexdll/flexdll.c | $(OCAML_DIR) $(FLEXDLL_DIR)
 	cd ocaml-$(OCAML_VERSION) && \
 	./configure --prefix=$(PREFIX) --build=x86_64-pc-cygwin --host=x86_64-w64-mingw32 && \
-	make flexdll world opt opt.opt flexlink.opt install
+	make && make install
 
 ocaml: $(OCAML_EXE)
 .PHONY: ocaml
@@ -122,6 +122,46 @@ ocamlbuild: $(OCAMLBUILD_BINARY)
 clean::
 	-rm -Rf ocamlbuild-$(OCAMLBUILD_VERSION)
 
+# ---- dune ----
+DUNE_VERSION=3.7.0
+DUNE_BINARY=$(PREFIX)/bin/dune
+
+dune-$(DUNE_VERSION).tar.gz:
+	curl -Lfo $@ https://github.com/ocaml/dune/archive/refs/tags/$(DUNE_VERSION).tar.gz
+
+dune-$(DUNE_VERSION): dune-$(DUNE_VERSION).tar.gz
+	tar xzf $<
+
+$(DUNE_BINARY): | dune-$(DUNE_VERSION)
+	cd $| && ./configure --libdir=$(PREFIX)/lib/ocaml && make release && make install
+
+dune: $(DUNE_BINARY)
+.PHONY: dune
+
+clean::
+	-rm -Rf dune-$(DUNE_VERSION)
+
+DUNE_INSTALL=dune build @install --profile release && dune install --profile release --prefix=$(PREFIX) --libdir=$(PREFIX)/lib/ocaml
+
+# ---- camlp-streams ----
+CAMLP_STREAMS_VERSION=5.0.1
+CAMLP_STREAMS_BINARY=$(PREFIX)/lib/ocaml/camlp-stream/camlp-streams.cmxa
+
+camlp-streams-$(CAMLP_STREAMS_VERSION).tar.gz:
+	curl -Lfo $@ https://github.com/ocaml/camlp-streams/archive/refs/tags/v$(CAMLP_STREAMS_VERSION).tar.gz
+
+camlp-streams-$(CAMLP_STREAMS_VERSION): camlp-streams-$(CAMLP_STREAMS_VERSION).tar.gz
+	tar xzf $<
+
+$(CAMLP_STREAMS_BINARY): $(DUNE_BINARY) | camlp-streams-$(CAMLP_STREAMS_VERSION)
+	cd $| && $(DUNE_INSTALL)
+
+camlp-streams: $(CAMLP_STREAMS_BINARY)
+.PHONY: camlp-streams
+
+clean::
+	-rm -Rf camlp-streams-$(CAMLP_STREAMS_VERSION)
+
 # ---- camlp4 ----
 
 CAMLP4_VERSION=4.14+1
@@ -136,7 +176,7 @@ $(CAMLP4_TGZ):
 $(CAMLP4_SRC): $(CAMLP4_TGZ)
 	tar xzfm $(CAMLP4_TGZ)
 
-$(CAMLP4_BINARY): $(OCAMLBUILD_BINARY) | $(CAMLP4_SRC)
+$(CAMLP4_BINARY): $(OCAMLBUILD_BINARY) $(CAMLP_STREAMS_BINARY) | $(CAMLP4_SRC)
 	cd $(CAMLP4_DIR) && \
 	./configure && make all && make install
 
@@ -195,8 +235,7 @@ gtksourceview-$(GTK_SOURCEVIEW_VERSION): gtksourceview-$(GTK_SOURCEVIEW_VERSION)
 
 $(GTK_SOURCEVIEW_DLL): $(LIBXML_DLL) $(GTK_BINARY) | gtksourceview-$(GTK_SOURCEVIEW_VERSION)
 	cd $| && \
-	./configure PKG_CONFIG=$(PREFIX)/bin/pkg-config --build=x86_64-pc-cygwin \
-	--host=x86_64-w64-mingw32 --prefix=$(PREFIX) && \
+	./configure PKG_CONFIG=$(PREFIX)/bin/pkg-config --build=x86_64-pc-cygwin --host=x86_64-w64-mingw32 --prefix=$(PREFIX) && \
 	make && make install
 
 gtksourceview: $(GTK_SOURCEVIEW_DLL)
@@ -217,7 +256,9 @@ $(LABLGTK_SRC):
 	download_and_untar https://github.com/garrigue/lablgtk/archive/refs/tags/$(LABLGTK_VERSION).tar.gz
 $(LABLGTK_CFG): $(CAMLP4_BINARY) $(GTK_BINARY) $(GTK_SOURCEVIEW_DLL) | $(LABLGTK_SRC)
 	cd lablgtk-$(LABLGTK_VERSION) && \
-	  (./configure "CC=x86_64-w64-mingw32-gcc" "USE_CC=1" || bash -vx ./configure "CC=x86_64-w64-mingw32-gcc" "USE_CC=1")
+	  (./configure "CC=CC=x86_64-w64-mingw32-gcc" "USE_CC=1" || bash -vx ./configure "CC=x86_64-w64-mingw32-gcc" "USE_CC=1") && \
+	  cd src && sed -i '1s/^/.SECONDARY:\n /' Makefile
+# .SECONDARY: stops make from deleting temporary files, which are required for installation
 
 $(LABLGTK_BUILD): $(LABLGTK_CFG)
 	cd lablgtk-$(LABLGTK_VERSION) && \
@@ -260,27 +301,6 @@ z3: $(Z3_BINARY)
 clean::
 	-rm -Rf $(Z3_DIR)
 
-# ---- dune ----
-DUNE_VERSION=3.7.0
-DUNE_BINARY=$(PREFIX)/bin/dune
-
-dune-$(DUNE_VERSION).tar.gz:
-	curl -Lfo $@ https://github.com/ocaml/dune/archive/refs/tags/$(DUNE_VERSION).tar.gz
-
-dune-$(DUNE_VERSION): dune-$(DUNE_VERSION).tar.gz
-	tar xzf $<
-
-$(DUNE_BINARY): | dune-$(DUNE_VERSION)
-	cd $| && ./configure --libdir=$(PREFIX)/lib/ocaml && make release && make install
-
-dune: $(DUNE_BINARY)
-.PHONY: dune
-
-clean::
-	-rm -Rf dune-$(DUNE_VERSION)
-
-DUNE_INSTALL=dune build @install --profile release && dune install --profile release --prefix=$(PREFIX) --libdir=$(PREFIX)/lib/ocaml
-
 # ---- csexp ----
 CSEXP_VERSION=1.5.1
 CSEXP_BINARY=$(PREFIX)/lib/ocaml/csexp/csexp.cmxa
@@ -305,25 +325,6 @@ $(STDUNE_BINARY): $(DUNE_BINARY) $(CSEXP_BINARY) | dune-$(DUNE_VERSION)
 DUNE_CONF_BINARY=$(PREFIX)/lib/ocaml/dune-configurator/configurator.cmxa
 $(DUNE_CONF_BINARY): $(DUNE_BINARY) $(STDUNE_BINARY) | dune-$(DUNE_VERSION)
 	cd $| && ./dune.exe build dune-configurator.install && ./dune.exe install dune-configurator --prefix=$(PREFIX) --libdir=$(PREFIX)/lib/ocaml
-
-# ---- camlp-streams ----
-CAMLP_STREAMS_VERSION=5.0.1
-CAMLP_STREAMS_BINARY=$(PREFIX)/lib/ocaml/camlp-stream/camlp-streams.cmxa
-
-camlp-streams-$(CAMLP_STREAMS_VERSION).tar.gz:
-	curl -Lfo $@ https://github.com/ocaml/camlp-streams/archive/refs/tags/v$(CAMLP_STREAMS_VERSION).tar.gz
-
-camlp-streams-$(CAMLP_STREAMS_VERSION): camlp-streams-$(CAMLP_STREAMS_VERSION).tar.gz
-	tar xzf $<
-
-$(CAMLP_STREAMS_BINARY): $(DUNE_BINARY) | camlp-streams-$(CAMLP_STREAMS_VERSION)
-	cd $| && $(DUNE_INSTALL)
-
-camlp-streams: $(CAMLP_STREAMS_BINARY)
-.PHONY: camlp-streams
-
-clean::
-	-rm -Rf camlp-streams-$(CAMLP_STREAMS_VERSION)
 
 # ---- sexplib0 ----
 SEXPLIB0_VERSION=0.15.1
